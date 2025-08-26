@@ -1,0 +1,176 @@
+--------------------------------------------26/08/2025-----------------------------------------------
+
+
+---Creating Source table 
+Create table emp_source(empid int,
+                        ename varchar, 
+                        dept varchar, 
+                        salary number,
+                        update_time timestamp);
+
+                        
+
+select * from emp_source;
+---inserting record in source table 
+insert into emp_source values(1,'Siddhesh','Finance',80500,current_timestamp);
+insert into emp_source values(2,'Harshal','HR',78000,current_timestamp);
+insert into emp_source values(3,'Janhavi','Marketing',55005,current_timestamp);
+insert into emp_source values(4,'Ritika','Sales',120000,current_timestamp);
+insert into emp_source values(5,'Vinit','IT',64050,current_timestamp);
+insert into emp_source values(6,'Manali','Analytics',76500,current_timestamp);
+insert into emp_source values(7,'Pawan','IT',46900,current_timestamp);
+insert into emp_source values(8,'Nikita','Sales',54980,current_timestamp);
+insert into emp_source values(9,'Prathmesh','Finance',42060,current_timestamp);
+
+
+select * from emp_source;
+---update record from source table 
+update emp_source set dept='IT' where empid=6;
+
+select * from emp_source;
+
+
+---create a target table 
+create table emp_target as select * from emp_source where 1=2;
+select * from emp_target;
+
+
+---create stream on source table 
+
+create stream emp_source_stream on table emp_source; 
+
+
+---create stream on target table
+
+create stream emp_tar_Sales on  table emp_target;
+create stream emp_tar_IT on table emp_target;
+create stream emp_tar_Finance on table emp_target;
+
+---create child tables on their specific table
+
+---sales table
+create table emp_Sales as select * from emp_target;
+
+
+--IT table
+create table emp_IT as select * from emp_target;
+
+--Finance table
+create table emp_finance as select * from emp_target;
+
+
+---- create tha task on target table 
+create or replace task emp_task 
+warehouse=Tasks_wh
+schedule='1 minute'
+as 
+merge into emp_target e using emp_source_stream s on e.empid = s.empid
+when matched and metadata$action = 'Delete'  and metadata$isupdate = 'FALSE'
+then delete
+when matched and metadata$action  = 'INSERT' and metadata$isupdate = 'TRUE'
+then update set   e.ename=s.ename,
+                  e.dept = s.dept,
+                  e.salary=s.salary,
+                  e.update_time=s.update_time  
+when not matched and metadata$action = 'INSERT' and metadata$isupdate = 'FALSE'
+THEN insert (empid,ename,dept,salary,update_time)
+values(s.empid,s.empname,s.depname,s.salary,s.update_time);
+
+alter task emp_task resume;
+
+
+
+
+--creating task to merge  into emp_sales
+create or replace  task emp_sales_task
+warehouse = tasks_wh
+schedule = '1 minute'
+as
+merge into emp_sales e using (select empid,ename,dept,salary,update_time,metadata$action as dml_action,metadata$isupdate as is_update
+                              from emp_tar_Sales where dept = 'Sales') s
+on e.empid = s.empid 
+when matched  and s.dml_action = 'delete' and s.is_update = 'false'
+then delete
+when matched  and s.dml_action = 'insert' and s.is_update = 'true'
+then update set 
+                e.ename = s.ename,
+                e.dept = s.dept,
+                e.salary = s.salary,
+                e.update_time = s.update_time
+when not matched and  s.dml_action = 'insert' and s.is_update = 'false'  
+then insert (empid,ename,dept,salary,update_time) values(s.empid,s.ename,s.dept,s.salary,s.update_time);
+
+
+desc task emp_sales_task;
+
+alter task emp_sales_task resume;
+
+-----task to merge into emp_IT tables
+
+create or replace  task emp_IT_task
+warehouse = tasks_wh
+schedule = '1 minute'
+as
+merge into emp_IT e using (select empid,ename,dept,salary,update_time,metadata$action as dml_action,metadata$isupdate as is_update
+                              from emp_tar_IT where dept = 'IT') s
+on e.empid = s.empid 
+when matched  and s.dml_action = 'delete' and s.is_update = 'false'
+then delete
+when matched  and s.dml_action = 'insert' and s.is_update = 'true'
+then update set 
+                e.ename = s.ename,
+                e.dept = s.dept,
+                e.salary = s.salary,
+                e.update_time = s.update_time
+when not matched and  s.dml_action = 'insert' and s.is_update = 'false'  
+then insert (empid,ename,dept,salary,update_time) values(s.empid,s.ename,s.dept,s.salary,s.update_time);
+
+
+
+desc task emp_IT_task;
+
+alter task emp_IT_task resume;
+
+
+----task to merge into emp_finance 
+
+
+create or replace  task emp_finance_task
+warehouse = tasks_wh
+schedule = '1 minute'
+as
+merge into emp_finance e using (select empid,ename,dept,salary,update_time,metadata$action as dml_action,metadata$isupdate as is_update
+                              from emp_tar_finance where dept = 'finance') s
+on e.empid = s.empid 
+when matched  and s.dml_action = 'delete' and s.is_update = 'false'
+then delete
+when matched  and s.dml_action = 'insert' and s.is_update = 'true'
+then update set 
+                e.ename = s.ename,
+                e.dept = s.dept,
+                e.salary = s.salary,
+                e.update_time = s.update_time
+when not matched and  s.dml_action = 'insert' and s.is_update = 'false'  
+then insert (empid,ename,dept,salary,update_time) values(s.empid,s.ename,s.dept,s.salary,s.update_time);
+
+
+desc task emp_finance_task;
+alter task emp_finance_task resume;
+
+
+
+
+show tasks;
+show streams;
+
+
+select * from emp_source; --------------source table 
+select * from emp_source_stream; ---------------source table stream 
+select * from emp_target;            -------target table 
+select * from emp_tar_Sales;        -----------target table streams on sales table
+select * from emp_tar_IT;           -------target table stream on IT table
+select * from emp_finance_IT;     ------------target table stream on finance table 
+select * from emp_sales;              -----sales table  (DAG table)
+select * from emp_IT;                   -------IT table (DAG table)
+select * from Emp_finance;              ----------finance table (DAG table)
+
